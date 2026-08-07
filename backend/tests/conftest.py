@@ -74,14 +74,38 @@ def seed_tag(db_conn):
         tag_id: str = "EQ-TEST-0001",
         equipment_name: str = "테스트 장비",
         nfc_tag_uid: str | None = None,
+        is_real_hardware: bool = True,
     ):
         with db_conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO tags (tag_id, equipment_name, nfc_tag_uid, is_active) VALUES (%s, %s, %s, TRUE)",
-                (tag_id, equipment_name, nfc_tag_uid),
+                """
+                INSERT INTO tags (tag_id, equipment_name, nfc_tag_uid, is_active, is_real_hardware)
+                VALUES (%s, %s, %s, TRUE, %s)
+                """,
+                (tag_id, equipment_name, nfc_tag_uid, is_real_hardware),
             )
         db_conn.commit()
         return tag_id
+
+    return _seed
+
+
+@pytest.fixture
+def seed_reader(db_conn):
+    """관리자 핀 편집기·rtls/live 통합 테스트용 리더를 하나 만들어준다."""
+
+    def _seed(
+        reader_id: str = "M999",
+        location_name: str | None = "테스트 리더",
+        is_real_hardware: bool = True,
+    ):
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO readers (reader_id, location_name, is_real_hardware) VALUES (%s, %s, %s)",
+                (reader_id, location_name, is_real_hardware),
+            )
+        db_conn.commit()
+        return reader_id
 
     return _seed
 

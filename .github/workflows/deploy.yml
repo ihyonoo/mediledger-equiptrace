@@ -27,6 +27,9 @@ jobs:
           - service: web
             context: ./frontend
             file: frontend/Dockerfile
+          - service: simulator
+            context: .
+            file: simulation/Dockerfile
     steps:
       - uses: actions/checkout@v4
 

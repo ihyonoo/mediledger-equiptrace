@@ -192,6 +192,40 @@ ALTER TABLE readers
     ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
+-- 층별 평면도 핀 좌표(관리자 핀 편집기가 채움). floor는 1~5, map_x/map_y는
+-- 이미지 가로/세로 대비 퍼센트(0~100)라 반응형 이미지에서도 핀 비율이 안 틀어진다.
+-- 배치 전 리더는 세 컬럼 모두 NULL로 두어 "아직 지도에 미배치" 상태를 표현한다.
+-- is_real_hardware는 실물 하드웨어 여부(기본 TRUE) — 시뮬레이터가 만든 row만 명시적으로 FALSE로 심는다.
+ALTER TABLE readers
+    ADD COLUMN IF NOT EXISTS floor SMALLINT,
+    ADD COLUMN IF NOT EXISTS map_x NUMERIC(5,2),
+    ADD COLUMN IF NOT EXISTS map_y NUMERIC(5,2),
+    ADD COLUMN IF NOT EXISTS is_real_hardware BOOLEAN NOT NULL DEFAULT TRUE;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'readers_floor_valid') THEN
+        ALTER TABLE readers ADD CONSTRAINT readers_floor_valid
+            CHECK (floor IS NULL OR floor BETWEEN 1 AND 5);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'readers_map_x_valid') THEN
+        ALTER TABLE readers ADD CONSTRAINT readers_map_x_valid
+            CHECK (map_x IS NULL OR (map_x >= 0 AND map_x <= 100));
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'readers_map_y_valid') THEN
+        ALTER TABLE readers ADD CONSTRAINT readers_map_y_valid
+            CHECK (map_y IS NULL OR (map_y >= 0 AND map_y <= 100));
+    END IF;
+    -- (floor, map_x, map_y)는 전부 채워지거나 전부 비어야 한다 — 절반만 채운 핀 방지.
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'readers_map_position_consistent') THEN
+        ALTER TABLE readers ADD CONSTRAINT readers_map_position_consistent
+            CHECK (
+                (floor IS NULL AND map_x IS NULL AND map_y IS NULL)
+                OR (floor IS NOT NULL AND map_x IS NOT NULL AND map_y IS NOT NULL)
+            );
+    END IF;
+END $$;
+
 ALTER TABLE tags
     ADD COLUMN IF NOT EXISTS nfc_tag_uid TEXT,
     ADD COLUMN IF NOT EXISTS asset_status TEXT NOT NULL DEFAULT 'available',
@@ -199,7 +233,11 @@ ALTER TABLE tags
     ADD COLUMN IF NOT EXISTS current_usage_id BIGINT,
     ADD COLUMN IF NOT EXISTS last_checkout_at TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS last_returned_at TIMESTAMPTZ,
-    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS is_real_hardware BOOLEAN NOT NULL DEFAULT TRUE;
+
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS is_real_hardware BOOLEAN NOT NULL DEFAULT TRUE;
 
 ALTER TABLE tag_state_history
     ADD COLUMN IF NOT EXISTS observed_at TIMESTAMPTZ,

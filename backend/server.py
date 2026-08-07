@@ -35,12 +35,14 @@ try:
         load_all_cached_tag_locations,
         load_latest_db_tag_locations,
         load_reader_location_map,
+        load_readers_for_admin,
         load_readers_with_status,
         load_tag_metadata,
         load_tags_last_seen,
         mark_tags_seen,
         normalize_nfc_token,
         resolve_tag_location_snapshot,
+        update_reader_map_position,
         upsert_readers_from_ingest,
     )
     from backend.schemas import (
@@ -53,6 +55,7 @@ try:
         NfcMappingUpsertRequest,
         NfcUsageActionRequest,
         Payload,
+        ReaderMapPositionRequest,
         RegisterRequest,
         ResendVerificationRequest,
         ResetPasswordRequest,
@@ -112,12 +115,14 @@ except ModuleNotFoundError as exc:
         load_all_cached_tag_locations,
         load_latest_db_tag_locations,
         load_reader_location_map,
+        load_readers_for_admin,
         load_readers_with_status,
         load_tag_metadata,
         load_tags_last_seen,
         mark_tags_seen,
         normalize_nfc_token,
         resolve_tag_location_snapshot,
+        update_reader_map_position,
         upsert_readers_from_ingest,
     )
     from schemas import (
@@ -130,6 +135,7 @@ except ModuleNotFoundError as exc:
         NfcMappingUpsertRequest,
         NfcUsageActionRequest,
         Payload,
+        ReaderMapPositionRequest,
         RegisterRequest,
         ResendVerificationRequest,
         ResetPasswordRequest,
@@ -963,6 +969,44 @@ def where(tag_id: str, authorization: str | None = Header(default=None)):
     }
 
 
+@app.get("/admin/readers")
+def list_admin_readers(
+    floor: int | None = Query(default=None, ge=1, le=5),
+    authorization: str | None = Header(default=None),
+):
+    require_authenticated_user(authorization, allowed_roles={"admin"})
+    try:
+        items = load_readers_for_admin(floor)
+    except Exception:
+        raise HTTPException(500, "리더 목록 조회 중 데이터베이스 오류가 발생했습니다.")
+
+    return {"ok": True, "count": len(items), "items": items}
+
+
+@app.put("/admin/readers/{reader_id}/map-position")
+def set_reader_map_position(
+    reader_id: str,
+    body: ReaderMapPositionRequest,
+    authorization: str | None = Header(default=None),
+):
+    require_authenticated_user(authorization, allowed_roles={"admin"})
+    try:
+        item = update_reader_map_position(
+            reader_id,
+            body.floor,
+            body.map_x,
+            body.map_y,
+            body.location_name,
+        )
+    except Exception:
+        raise HTTPException(500, "리더 좌표 저장 중 데이터베이스 오류가 발생했습니다.")
+
+    if not item:
+        raise HTTPException(404, "리더를 찾을 수 없습니다.")
+
+    return {"ok": True, "item": item}
+
+
 @app.get("/admin/nfc-mappings")
 def list_nfc_mappings(authorization: str | None = Header(default=None)):
     require_authenticated_user(authorization, allowed_roles={"admin"})
@@ -1377,7 +1421,8 @@ def usage_return(body: NfcUsageActionRequest, authorization: str | None = Header
 
 @app.get("/rtls/live")
 def rtls_live(authorization: str | None = Header(default=None)):
-    require_authenticated_user(authorization, allowed_roles={"admin", "staff"})
+    user = require_authenticated_user(authorization, allowed_roles={"admin", "staff"})
+    is_admin = user["role"] == "admin"
     now = int(time.time())
     reader_locations = load_reader_location_map()
     cached_locations = load_all_cached_tag_locations()
@@ -1418,9 +1463,7 @@ def rtls_live(authorization: str | None = Header(default=None)):
         seen_epoch = tag_last_seen.get(tag_id)
         changed_at_epoch = cached_location.get("changed_at")
         effective_seen = seen_epoch if seen_epoch is not None else changed_at_epoch
-        is_online = (
-            isinstance(effective_seen, int) and (now - effective_seen) <= TAG_OFFLINE_SEC
-        )
+        is_online = isinstance(effective_seen, int) and (now - effective_seen) <= TAG_OFFLINE_SEC
 
         location = None
         if reader_id:
@@ -1428,24 +1471,25 @@ def rtls_live(authorization: str | None = Header(default=None)):
                 reader_id, READER_LOCATION.get(reader_id, reader_id)
             )
 
-        items.append(
-            {
-                "tag_id": tag_id,
-                "equipment_name": metadata.get("equipment_name"),
-                "equipment_type": metadata.get("equipment_type"),
-                "serial_number": metadata.get("serial_number"),
-                "asset_status": metadata.get("asset_status") or "available",
-                "current_holder_user_id": metadata.get("current_holder_user_id"),
-                "current_holder_name": metadata.get("current_holder_name"),
-                "reader_id": reader_id,
-                "location": location,
-                "rssi": None,
-                "updated_at": changed_at_epoch,
-                "last_seen": effective_seen,
-                "is_online": is_online,
-                "is_stale": not is_online,
-            }
-        )
+        item = {
+            "tag_id": tag_id,
+            "equipment_name": metadata.get("equipment_name"),
+            "equipment_type": metadata.get("equipment_type"),
+            "serial_number": metadata.get("serial_number"),
+            "asset_status": metadata.get("asset_status") or "available",
+            "current_holder_user_id": metadata.get("current_holder_user_id"),
+            "current_holder_name": metadata.get("current_holder_name"),
+            "reader_id": reader_id,
+            "location": location,
+            "rssi": None,
+            "updated_at": changed_at_epoch,
+            "last_seen": effective_seen,
+            "is_online": is_online,
+            "is_stale": not is_online,
+        }
+        if is_admin:
+            item["is_real_hardware"] = metadata.get("is_real_hardware", True)
+        items.append(item)
 
     items.sort(
         key=lambda item: (item["is_online"], item.get("last_seen") or 0),
@@ -1453,6 +1497,9 @@ def rtls_live(authorization: str | None = Header(default=None)):
     )
 
     readers = load_readers_with_status(now, READER_OFFLINE_SEC)
+    if not is_admin:
+        for reader in readers:
+            reader.pop("is_real_hardware", None)
     readers_online = sum(1 for r in readers if r["is_online"])
     tags_online = sum(1 for item in items if item["is_online"])
 

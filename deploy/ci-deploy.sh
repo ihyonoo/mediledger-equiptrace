@@ -17,12 +17,12 @@ main() {
   git fetch origin main
   git pull --ff-only origin main
 
-  # backend/web 최신 이미지만 GHCR에서 pull한다. public 패키지라 로그인 불필요.
-  docker compose pull backend web
+  # backend/web/simulator 최신 이미지만 GHCR에서 pull한다. public 패키지라 로그인 불필요.
+  docker compose pull backend web simulator
 
-  # backend/web만 재생성한다.
+  # backend/web/simulator만 재생성한다.
   # postgres/redis/cloudflared/besu는 --no-deps로 그대로 둔다.
-  docker compose up -d --no-deps backend web
+  docker compose up -d --no-deps backend web simulator
 
   # 더 이상 참조되지 않는 옛 이미지 레이어를 정리한다.
   docker image prune -f

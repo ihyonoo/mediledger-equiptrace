@@ -62,6 +62,21 @@ services:
     networks:
       - besu-qbft
 
+  simulator:
+    # backend/web과 동일 — GHCR에서 pull만 한다.
+    image: ghcr.io/ihyonoo/mediledger-equiptrace-simulator:latest
+    container_name: mediledger-simulator
+    restart: unless-stopped
+    # DATABASE_URL·SIM_STAFF_PASSWORD 등은 backend와 같은 루트 .env에서 주입된다.
+    env_file: .env
+    environment:
+      # 컨테이너 네트워크 내부 DNS로 backend에 접근 (호스트 전용 8000 포트가 아님).
+      BACKEND_BASE_URL: http://backend:8000
+    depends_on:
+      - backend
+    networks:
+      - besu-qbft
+
   web:
     # backend와 동일 — GHCR에서 pull만 한다.
     image: ghcr.io/ihyonoo/mediledger-equiptrace-web:latest

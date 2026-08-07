@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '../components/ui/badge';
 import AppShell from '../components/layout/AppShell';
 import AdminNav from '../components/layout/AdminNav';
+import ProvenanceDot from '../components/ui/ProvenanceDot';
 import { API_BASE_URL } from '../lib/runtime';
 import { buildAuthHeaders, getStoredAuthSession, LOGIN_PATH } from '../lib/auth';
 import { useAuthGuard, useLogout } from '../lib/useAuthGuard';
@@ -11,6 +12,7 @@ type LiveReaderItem = {
   location: string;
   is_online: boolean;
   last_seen: number | null;
+  is_real_hardware?: boolean;
 };
 
 type LiveTagItem = {
@@ -20,6 +22,7 @@ type LiveTagItem = {
   location: string | null;
   is_online: boolean;
   last_seen: number | null;
+  is_real_hardware?: boolean;
 };
 
 function dotClass(isOnline: boolean) {
@@ -52,6 +55,7 @@ export default function DeviceStatus() {
   const [readersOnline, setReadersOnline] = useState(0);
   const [tagsOnline, setTagsOnline] = useState(0);
   const [error, setError] = useState('');
+  const [hideSimulated, setHideSimulated] = useState(false);
 
   const logout = useLogout();
 
@@ -100,9 +104,20 @@ export default function DeviceStatus() {
     };
   }, [isAuthorized, logout]);
 
+  const visibleReaders = useMemo(
+    () => (hideSimulated ? readers.filter((r) => r.is_real_hardware !== false) : readers),
+    [readers, hideSimulated],
+  );
+  const visibleTags = useMemo(
+    () => (hideSimulated ? tags.filter((t) => t.is_real_hardware !== false) : tags),
+    [tags, hideSimulated],
+  );
   const readersTotal = readers.length;
   const tagsTotal = tags.length;
-  const sortedTags = useMemo(() => [...tags].sort((a, b) => Number(b.is_online) - Number(a.is_online)), [tags]);
+  const sortedTags = useMemo(
+    () => [...visibleTags].sort((a, b) => Number(b.is_online) - Number(a.is_online)),
+    [visibleTags],
+  );
 
   if (!isAuthorized) return null;
 
@@ -114,6 +129,14 @@ export default function DeviceStatus() {
             <div>
               <div className="panel-title">기기 상태</div>
             </div>
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={hideSimulated}
+                onChange={(event) => setHideSimulated(event.target.checked)}
+              />
+              모의 데이터 숨기기
+            </label>
           </div>
           {error ? <div className="alert alert-error mb-3">{error}</div> : null}
           <div className="grid gap-3 sm:grid-cols-2">
@@ -143,13 +166,16 @@ export default function DeviceStatus() {
             {readersTotal === 0 ? (
               <div className="empty-state">등록된 리더가 없습니다.</div>
             ) : (
-              readers.map((r) => (
+              visibleReaders.map((r) => (
                 <div
                   key={r.reader_id}
                   className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3"
                 >
                   <div className="min-w-0">
-                    <div className="font-medium text-foreground">{r.location}</div>
+                    <div className="flex items-center gap-1.5 font-medium text-foreground">
+                      {r.location}
+                      <ProvenanceDot isRealHardware={r.is_real_hardware ?? true} />
+                    </div>
                     <div className="mt-1 text-xs text-muted-foreground">{r.reader_id}</div>
                   </div>
                   <div className="text-right text-xs text-muted-foreground">
@@ -182,7 +208,10 @@ export default function DeviceStatus() {
                   className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3"
                 >
                   <div className="min-w-0">
-                    <div className="truncate font-medium text-foreground">{t.equipment_name?.trim() || t.tag_id}</div>
+                    <div className="flex items-center gap-1.5 truncate font-medium text-foreground">
+                      {t.equipment_name?.trim() || t.tag_id}
+                      <ProvenanceDot isRealHardware={t.is_real_hardware ?? true} />
+                    </div>
                     <div className="mt-1 text-xs text-muted-foreground" title={t.tag_id}>
                       {shortTag(t.tag_id)} · {t.location ?? '감지 안 됨'}
                     </div>
